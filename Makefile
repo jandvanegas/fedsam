@@ -1,4 +1,4 @@
-run_fedavg:
+training:
   # run_fedavg 
   # run_fedavg_with_swa 
   # run_fedsam 
