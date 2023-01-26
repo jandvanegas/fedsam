@@ -3,7 +3,7 @@ import torch.nn as nn
 
 class ClientModel(nn.Module):
     def __init__(self, lr, num_classes, device):
-        super(ClientModel, self).init()
+        super(ClientModel, self).__init__()
         self.lr = lr
         self.num_classes = num_classes
         self.device = device
