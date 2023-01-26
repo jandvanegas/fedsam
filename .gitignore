@@ -12,3 +12,4 @@ models/sent140/embs.json
 _build/
 _templates/
 autodoc/
+.null-ls*
