@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-pushd ../models
+pushd ./models
 
 declare -a alphas=("0" "0.05")
 
