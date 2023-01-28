@@ -16,3 +16,4 @@ autodoc/
 torch_whl
 local_torch
 models/wandb
+data

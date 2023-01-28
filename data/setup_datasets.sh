@@ -2,6 +2,11 @@
 #
 # script to preprocess data
 
+activate () {
+  . ../.venv/bin/activate
+}
+activate
+
 echo "Downloading CIFAR10..."
 cd ./cifar10/preprocessing
 wget https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz
