@@ -13,3 +13,6 @@ _build/
 _templates/
 autodoc/
 .null-ls*
+torch_whl
+local_torch
+models/wandb
