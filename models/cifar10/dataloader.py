@@ -12,7 +12,7 @@ IMAGE_SIZE = 32
 IMAGES_DIR = os.path.join('..', 'data', 'cifar10', 'data', 'raw', 'img')
 
 class ClientDataset(Dataset):
-    """ CIFAR100 Dataset """
+    """ CIFAR10 Dataset """
 
     def __init__(self, data, train=True, loading='training_time', cutout=None):
         """

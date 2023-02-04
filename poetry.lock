@@ -931,7 +931,7 @@ sweeps = ["sweeps (>=0.2.0)"]
 [metadata]
 lock-version = "1.1"
 python-versions = "3.8.10"
-content-hash = "a74168282a93930bb25916a724f97fe96fa2f54929b9d30794b70e29f3b3524a"
+content-hash = "8f3458897371a0f041813c2c283ae5d8a6a9fe0424c7ad754ff0b155c85b9818"
 
 [metadata.files]
 appdirs = [

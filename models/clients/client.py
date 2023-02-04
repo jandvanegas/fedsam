@@ -1,20 +1,16 @@
-import copy
 import numpy as np
-import random
 import torch
-import torch.distributions.constraints as constraints
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import warnings
 from baseline_constants import ACCURACY_KEY
-from datetime import datetime
 
 
 class Client:
 
     def __init__(self, seed, client_id, lr, weight_decay, batch_size, momentum, train_data, eval_data, model, device=None,
-                 num_workers=0, run=None, mixup=False, mixup_alpha=1.0):
+                 num_workers=0, run=None, mixup=False, mixup_alpha=1.0, model_index=None):
         self._model = model
         self.id = client_id
         self.train_data = train_data
@@ -33,6 +29,7 @@ class Client:
         self.run = run
         self.mixup = mixup
         self.mixup_alpha = mixup_alpha # α controls the strength of interpolation between feature-target pairs
+        self.model_index = model_index
 
     def train(self, num_epochs=1, batch_size=10, minibatch=None):
         """Trains on self.model using the client's train_data.

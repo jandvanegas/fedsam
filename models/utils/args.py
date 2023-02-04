@@ -1,7 +1,7 @@
 import argparse
 
 DATASETS = ['cifar10', 'cifar100']
-SERVER_ALGORITHMS = ['fedavg', 'fedopt']
+SERVER_ALGORITHMS = ['fedavg', 'fedopt', 'fedmd']
 SERVER_OPTS = ['sgd', 'adam', 'adagrad', 'fedavgm']
 CLIENT_ALGORITHMS = ['asam', 'sam']
 MINIMIZERS = ['sam', 'asam']
@@ -16,6 +16,11 @@ def parse_args():
                     choices=DATASETS,
                     required=True)
     ## FEDERATED SETTING ##
+    parser.add_argument('--publicdataset',
+                    help='name of public dataset;',
+                    type=str,
+                    choices=DATASETS,
+                    required=False)
     parser.add_argument('--num-rounds',
                         help='number of rounds to simulate;',
                         type=int,
