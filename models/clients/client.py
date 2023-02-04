@@ -9,7 +9,7 @@ from baseline_constants import ACCURACY_KEY
 
 class Client:
 
-    def __init__(self, seed, client_id, lr, weight_decay, batch_size, momentum, train_data, eval_data, model, device=None,
+    def __init__(self, seed, client_id, lr, weight_decay, batch_size, momentum, train_data, eval_data, model, device,
                  num_workers=0, run=None, mixup=False, mixup_alpha=1.0, model_index=None):
         self._model = model
         self.id = client_id
@@ -84,7 +84,7 @@ class Client:
     def run_epoch_with_mixup(self, optimizer, criterion):
         running_loss = 0.0
         i = 0
-        for j, data in enumerate(self.trainloader):
+        for _, data in enumerate(self.trainloader):
             inputs, targets = data[0].to(self.device), data[1].to(self.device)
             inputs, targets_a, targets_b, lam = self.mixup_data(inputs, targets)
             optimizer.zero_grad()

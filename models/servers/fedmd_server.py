@@ -18,7 +18,8 @@ class FedMdServer:
         self.public_client_models = [
             copy.deepcopy(client_model) for client_model in public_client_models
         ]
-        self.devices = [client_model.device for client_model in client_models]
+        self.devices = [client_model.device for client_model in self.client_models]
+        self.public_devices = [client_model.device for client_model in self.public_client_models]
         self.total_grad = 0
         self.selected_clients = []
         self.updates = []
@@ -189,9 +190,10 @@ class FedMdServer:
         total_params_norm = total_norm**0.5
         return total_params_norm
 
-    def get_model_grad(self):
+    def get_model_grad(self, client_model):
         """Returns:
         self.total_grad: total gradient of the model (zero in case of FedAvg, where the gradient is never stored)"""
+        # todo store gradient
         return self.total_grad
 
     def get_model_grad_by_param(self, client_model):

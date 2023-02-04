@@ -90,14 +90,14 @@ def main():
     public_client_models = []
     client_path = f"clients.{client_sufix}"
     PublicClientDataset = None
+    mod = importlib.import_module(model_path)
+    dataset = importlib.import_module(dataset_path)
+    ClientDataset = getattr(dataset, "ClientDataset")
     if args.model == "destillation":
         publicmodel_path = "%s.%s" % (args.publicdataset, args.model)
         publicdataset_path = "%s.%s" % (args.publicdataset, "dataloader")
-        mod = importlib.import_module(model_path)
-        dataset = importlib.import_module(dataset_path)
         publicdataset = importlib.import_module(publicdataset_path)
         publicmod = importlib.import_module(publicmodel_path)
-        ClientDataset = getattr(dataset, "ClientDataset")
         PublicClientDataset = getattr(publicdataset, "ClientDataset")
         print("Running experiment with server", server_path, "and client", client_path)
         client_models = []
@@ -110,20 +110,10 @@ def main():
             client_models.append(client_model)
             public_client_model = PublicClientModel(*model_params, device)
             public_client_models.append(public_client_model)
-        if args.load and wandb.run and wandb.run.resumed:  # load model from checkpoint
-            client_models, checkpoint, ckpt_path_resumed = resume_run(
-                client_models, args, wandb.run
-            )
-            if args.restart:  # start new wandb run
-                wandb.finish()
-                print("Starting new run...")
-                run = init_wandb(args, alpha=alpha, run_id=None)
+        assert not args.load, "Not implemented checkpoimws yet"
         client_models = [model.to(device) for model in client_models]
         public_client_models = [model.to(device) for model in public_client_models]
     else:
-        dataset = importlib.import_module(dataset_path)
-        ClientDataset = getattr(dataset, "ClientDataset")
-        mod = importlib.import_module(model_path)
         ClientModel = getattr(mod, "ClientModel")
         print("Running experiment with server", server_path, "and client", client_path)
         Client, Server = get_clients_and_server(server_path, client_path)
@@ -171,7 +161,13 @@ def main():
     if args.model == "destillation":
 
         public_train_clients, public_test_clients = setup_clients(
-            args, client_models, Client, PublicClientDataset, run, device, public=True
+            args,
+            public_client_models,
+            Client,
+            PublicClientDataset,
+            run,
+            device,
+            public=True,
         )
         (
             public_train_client_ids,
@@ -259,12 +255,12 @@ def main():
 
         if args.model == "destillation":
             select_clients(i, server, public_train_clients, clients_per_round, args)
+            # Train public data
             sys_metrics = server.train_model(
                 num_epochs=args.num_epochs,
                 batch_size=args.batch_size,
                 minibatch=args.minibatch,
             )
-
             update_server(i, server, args, swa_n)
 
             accuracy = test_model(
@@ -282,7 +278,8 @@ def main():
             if accuracy is not None:
                 last_accuracies.append(accuracy)
 
-            log_gradient_information(i, server)
+            for model in server.client_models:
+                log_gradient_information(i, server, model, public=True)
             save_models(
                 i,
                 num_rounds,
@@ -322,8 +319,12 @@ def main():
         )
         if accuracy is not None:
             last_accuracies.append(accuracy)
-
-        log_gradient_information(i, server)
+        
+        if hasattr(server, "client_models"):
+            for model in server.client_models:
+                log_gradient_information(i, server, model, public=False)
+        else:
+            log_gradient_information(i, server)
         save_models(
             i,
             num_rounds,
@@ -386,6 +387,7 @@ def create_clients(
         client = 0
         if len(clients_models) > 1:
             client = int(u) % 5
+
         client_params["model"] = clients_models[client]
         client_params["model_index"] = client
         c_traindata = ClientDataset(
@@ -701,19 +703,31 @@ def test_model(
             return test_metrics[0]
 
 
-def log_gradient_information(i, server):
-    model_grad_norm = server.get_model_grad()
-    grad_by_param = server.get_model_grad_by_param()
+def log_gradient_information(i, server, model=None, public=False):
+    model_grad_norm = (
+        server.get_model_grad() if not model else server.get_model_grad(model)
+    )
+
+    grad_by_param = (
+        server.get_model_grad_by_param()
+        if not model
+        else server.get_model_grad_by_param(model)
+    )
     for param, grad in grad_by_param.items():
         name = "params_grad/" + param
         wandb.log({name: grad}, commit=False)
-    model_params_norm = server.get_model_params_norm()
-
+    model_params_norm = (
+        server.get_model_params_norm()
+        if not model
+        else server.get_model_params_norm(model)
+    )
     wandb.log(
         {
             "model total norm": model_grad_norm,
             "global model parameters norm": model_params_norm,
             "round": i + 1,
+            "model": model,
+            "public": public,
         },
         commit=True,
     )

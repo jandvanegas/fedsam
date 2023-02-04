@@ -17,3 +17,5 @@ torch_whl
 local_torch
 models/wandb
 data
+models/results/
+wandb/

@@ -5,9 +5,7 @@ from torch import nn
 
 def build_model(num_classes=100, n1=32, n2=64, n3=128, softmax=True):
     class ClientX(nn.Module):
-        def __init__(
-            self, device, *_, **__
-        ):
+        def __init__(self, device, *_, **__):
             self.device = device
             super(ClientX, self).__init__()
             n0 = 3
@@ -75,6 +73,14 @@ def build_model(num_classes=100, n1=32, n2=64, n3=128, softmax=True):
             )
             x_out = (x_in + 2 * padding - 1 * (kernel_size - 1) - 1) / stride + 1
             self.FC1 = nn.Linear(int(x_out * x_out * n3), num_classes)
+
+            self.size = self.model_size()
+
+        def model_size(self):
+            tot_size = 0
+            for param in self.parameters():
+                tot_size += param.size()[0]
+            return tot_size
 
         def forward(self, x):
             x = self.CNN1(x)

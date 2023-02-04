@@ -135,6 +135,14 @@ def build_resnet20(num_classes):
 
             self.fc = nn.Linear(64, self.num_classes)
 
+            self.size = self.model_size()
+
+        def model_size(self):
+            tot_size = 0
+            for param in self.parameters():
+                tot_size += param.size()[0]
+            return tot_size
+
         def forward(self, x):
 
             # base
