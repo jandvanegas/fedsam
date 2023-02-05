@@ -249,3 +249,9 @@ class FedMdServer:
         models = torch.load(path)
         for client in clients:
             client.model.load_state_dict(models[f"client_{client.model_index}_model"])
+
+    def get_clients_by_model(self, clients):
+        clients_by_model = {0: [], 1: [], 2: [], 3: [], 4: []}
+        for client in clients:
+            clients_by_model[client.model_index].append(client)
+        return clients_by_model

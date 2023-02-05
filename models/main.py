@@ -28,7 +28,6 @@ os.environ["WANDB_MODE"] = "offline"
 def main():
     args = parse_args()
     check_args(args)
-
     # Set the random seed if provided (affects client sampling and batching)
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -183,21 +182,37 @@ def main():
         print("Checkpoint name:", ckpt_name)
 
     fp = open(file, "w")
-    last_accuracies = []
+    last_accuracies = {}
 
-    print_stats(
-        start_round,
-        server,
-        train_clients,
-        train_client_num_samples,
-        test_clients,
-        test_client_num_samples,
-        args,
-        fp,
-    )
+    if args.model == "destillation":
+        train_clients_by_model = server.get_clients_by_model(train_clients)
+        test_clients_by_model = server.get_clients_by_model(test_clients)
+        for model_index in range(5):
+            train_model_clients = train_clients_by_model[model_index]
+            test_model_clients = test_clients_by_model[model_index]
+            print_stats(
+                start_round,
+                server,
+                train_model_clients,
+                server.get_clients_info(train_model_clients)[1],
+                test_model_clients,
+                server.get_clients_info(test_model_clients)[1],
+                args,
+                fp,
+                model=model_index,
+            )
+    else:
+        print_stats(
+            start_round,
+            server,
+            train_clients,
+            train_client_num_samples,
+            test_clients,
+            test_client_num_samples,
+            args,
+            fp,
+        )
 
-
-    wandb.log({"round": start_round}, commit=True)
     ## Setup SWA
     swa_n = 0
 
@@ -213,11 +228,12 @@ def main():
     # Start pretraining
 
     if args.model == "destillation":
-        print(f"{'*'*10}Starting pretraining{'*'*10}")
-
-        if os.path.exists("./pretraining"):
+        wandb.log({"round": -1}, commit=True)
+        pretraning_path = f"./pretraining_{alpha}_{args.num_epochs}"
+        print(f"{'*'*10}Starting pretraining from/to {pretraning_path}{'*'*10}")
+        if os.path.exists(pretraning_path):
             print(f"{'*'*10}Pretraining already done{'*'*10}")
-            server.load_all(train_clients, "./pretraining")
+            server.load_all(train_clients, pretraning_path)
         else:
             server.train_model(
                 num_epochs=args.num_epochs,
@@ -226,26 +242,32 @@ def main():
                 clients=train_clients,
                 pre_training=True,
             )
-            server.save_all(train_clients, "./pretraining")
+            server.save_all(train_clients, pretraning_path)
+        for model_index in range(5):
+            train_model_clients = train_clients_by_model[model_index]
+            test_model_clients = test_clients_by_model[model_index]
+            accuracy = test_model(
+                -1,
+                eval_every,
+                num_rounds,
+                server,
+                train_model_clients,
+                server.get_clients_info(train_model_clients)[1],
+                test_model_clients,
+                server.get_clients_info(test_model_clients)[1],
+                args,
+                fp,
+                model=model_index,
+            )
+            if accuracy is not None:
+                if model_index in last_accuracies:
+                    last_accuracies[model_index].append(accuracy)
+                else:
+                    last_accuracies[model_index] = [accuracy]
+            # Todo implement for multiple models
+            # for model in server.client_models:
+            #     log_gradient_information(-1, server, model, public=True)
         quit()
-
-        accuracy = test_model(
-            -1,
-            eval_every,
-            num_rounds,
-            server,
-            train_clients,
-            train_client_num_samples,
-            test_clients,
-            test_client_num_samples,
-            args,
-            fp,
-        )
-        if accuracy is not None:
-            last_accuracies.append(accuracy)
-
-        for model in server.client_models:
-            log_gradient_information(-1, server, model, public=True)
         save_models(
             -1,
             num_rounds,
@@ -258,7 +280,8 @@ def main():
             swa_n,
             file,
         )
-
+    quit()
+    wandb.log({"round": start_round}, commit=True)
     # Start training
     for i in range(start_round, num_rounds):
         print(
@@ -269,7 +292,6 @@ def main():
             "--- Round %d of %d: Training %d Clients ---\n"
             % (i + 1, num_rounds, clients_per_round)
         )
-
 
         select_clients(i, server, train_clients, clients_per_round, args)
 
@@ -283,20 +305,47 @@ def main():
 
         update_server(i, server, args, swa_n)
 
-        accuracy = test_model(
-            i,
-            eval_every,
-            num_rounds,
-            server,
-            train_clients,
-            train_client_num_samples,
-            test_clients,
-            test_client_num_samples,
-            args,
-            fp,
-        )
-        if accuracy is not None:
-            last_accuracies.append(accuracy)
+        if args.model == "destillation":
+
+            train_clients_by_model = server.get_clients_by_model(
+                server.selected_clients
+            )
+            test_clients_by_model = server.get_clients_by_model(test_clients)
+            for model_index in range(5):
+                accuracy = test_model(
+                    -1,
+                    eval_every,
+                    num_rounds,
+                    server,
+                    train_clients_by_model[model_index],
+                    train_client_num_samples,
+                    test_clients_by_model[model_index],
+                    test_client_num_samples,
+                    args,
+                    fp,
+                    model=model_index,
+                )
+                if accuracy is not None:
+                    if model_index in last_accuracies:
+                        last_accuracies[model_index].append(accuracy)
+                    else:
+                        last_accuracies[model_index] = [accuracy]
+
+        else:
+            accuracy = test_model(
+                i,
+                eval_every,
+                num_rounds,
+                server,
+                train_clients,
+                train_client_num_samples,
+                test_clients,
+                test_client_num_samples,
+                args,
+                fp,
+            )
+            if accuracy is not None:
+                last_accuracies[0].append(accuracy)
 
         if hasattr(server, "client_models"):
             for model in server.client_models:
@@ -359,6 +408,7 @@ def create_clients(
     PublicDataset=None,
     run=None,
     device=None,
+    model_index=None,
 ):
     clients = []
     client_params = define_client_params(args.client_algorithm, args)
@@ -368,7 +418,10 @@ def create_clients(
     for u in users:
         client = 0
         if len(clients_models) > 1 and public_models and PublicDataset and public_data:
-            client = int(u) % 5
+            if model_index is None:
+                client = int(u) % 5
+            else:
+                client = model_index
             client_params["public_model"] = public_models[client]
             client_params["public_data"] = PublicDataset(public_data)
             client_params["share_model"] = False
@@ -416,10 +469,10 @@ def setup_clients(
         )
         data = read_public_data(public_data_dir, args.alpha)
         values = data.values()
-        public_data = {'x': [], 'y': []}
+        public_data = {"x": [], "y": []}
         for client in values:
-            public_data['x'].extend(client.get('x'))
-            public_data['y'].extend(client.get('y'))
+            public_data["x"].extend(client.get("x"))
+            public_data["y"].extend(client.get("y"))
 
     (
         train_users,
@@ -444,20 +497,26 @@ def setup_clients(
         public_models=public_models,
         PublicDataset=PublicDataset,
     )
-    test_clients = create_clients(
-        test_users,
-        train_data,
-        test_data,
-        models,
-        args,
-        ClientDataset,
-        Client,
-        run=run,
-        device=device,
-        public_data=public_data,
-        public_models=public_models,
-        PublicDataset=PublicDataset,
-    )
+    test_clients = []
+    # todo improve to be valid with other training
+    for model_index in range(5):
+        test_clients.extend(
+            create_clients(
+                test_users,
+                train_data,
+                test_data,
+                models,
+                args,
+                ClientDataset,
+                Client,
+                run=run,
+                device=device,
+                public_data=public_data,
+                public_models=public_models,
+                PublicDataset=PublicDataset,
+                model_index=model_index,
+            )
+        )
 
     return train_clients, test_clients
 
@@ -575,27 +634,31 @@ def print_stats(
     args,
     fp,
     public=False,
+    model=0,
 ):
     train_stat_metrics = server.test_model(
         train_clients, args.batch_size, set_to_use="train"
     )
-    val_metrics = print_metrics(
-        train_stat_metrics, train_num_samples, fp, prefix="train_"
+    val_metrics, val_metrics_names = print_metrics(
+        train_stat_metrics, train_num_samples, fp, prefix="train_", model=model
     )
 
     test_stat_metrics = server.test_model(
         test_clients, args.batch_size, set_to_use="test"
     )
-    test_metrics = print_metrics(
-        test_stat_metrics, test_num_samples, fp, prefix="{}_".format("test")
+    test_metrics, test_metrics_names= print_metrics(
+        test_stat_metrics, test_num_samples, fp, prefix="{}_".format("test"), model=model
     )
-
     wandb.log(
         {
-            "Validation accuracy": val_metrics[0],
-            "Validation loss": val_metrics[1],
-            "Test accuracy": test_metrics[0],
-            "Test loss": test_metrics[1],
+            f"Validation accuracy {model}": val_metrics[
+                val_metrics_names.index("accuracy")
+            ],
+            f"Validation loss {model}": val_metrics[val_metrics_names.index("loss")],
+            f"Test accuracy {model}": test_metrics[
+                test_metrics_names.index("accuracy")
+            ],
+            f"Test loss {model}": test_metrics[test_metrics_names.index("loss")],
             "round": num_round,
             "public": public,
         },
@@ -605,7 +668,7 @@ def print_stats(
     return val_metrics, test_metrics
 
 
-def print_metrics(metrics, weights, fp, prefix=""):
+def print_metrics(metrics, weights, fp, prefix="", model=None):
     """Prints weighted averages of the given metrics.
 
     Args:
@@ -614,6 +677,8 @@ def print_metrics(metrics, weights, fp, prefix=""):
         weights: dict with client ids as keys. Each entry is the weight
             for that client.
     """
+    if model is None:
+        model = ""
     ordered_weights = [weights[c] for c in sorted(weights)]
     metric_names = metrics_writer.get_metrics_names(metrics)
     metrics_values = []
@@ -622,7 +687,7 @@ def print_metrics(metrics, weights, fp, prefix=""):
         print(
             "%s: %g, 10th percentile: %g, 50th percentile: %g, 90th percentile %g"
             % (
-                prefix + metric,
+                str(model) + prefix + metric,
                 np.average(ordered_metric, weights=ordered_weights),
                 np.percentile(ordered_metric, 10),
                 np.percentile(ordered_metric, 50),
@@ -632,7 +697,7 @@ def print_metrics(metrics, weights, fp, prefix=""):
         fp.write(
             "%s: %g, 10th percentile: %g, 50th percentile: %g, 90th percentile %g\n"
             % (
-                prefix + metric,
+                str(model) + prefix + metric,
                 np.average(ordered_metric, weights=ordered_weights),
                 np.percentile(ordered_metric, 10),
                 np.percentile(ordered_metric, 50),
@@ -641,7 +706,7 @@ def print_metrics(metrics, weights, fp, prefix=""):
         )
         # fp.write("Clients losses:", ordered_metric)
         metrics_values.append(np.average(ordered_metric, weights=ordered_weights))
-    return metrics_values
+    return metrics_values, metric_names
 
 
 def select_clients(i, server, train_clients, clients_per_round, args):
@@ -683,6 +748,7 @@ def test_model(
     test_client_num_samples,
     args,
     fp,
+    model=0,
 ):
 
     if (
@@ -697,6 +763,7 @@ def test_model(
             test_client_num_samples,
             args,
             fp,
+            model=model,
         )
         if (i + 1) > num_rounds - 100:
             return test_metrics[0]
