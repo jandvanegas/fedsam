@@ -1,6 +1,7 @@
 import copy
 import numpy as np
 import torch
+from torch.utils.data import DataLoader, random_split, SubsetRandomSampler 
 from baseline_constants import (
     BYTES_WRITTEN_KEY,
     BYTES_READ_KEY,
@@ -11,7 +12,7 @@ from baseline_constants import (
 
 
 class FedMdServer:
-    def __init__(self, client_models, public_client_models):
+    def __init__(self, client_models, public_client_models, public_data, PublicDataset):
         self.client_models = [
             copy.deepcopy(client_model) for client_model in client_models
         ]
@@ -19,12 +20,17 @@ class FedMdServer:
             copy.deepcopy(client_model) for client_model in public_client_models
         ]
         self.devices = [client_model.device for client_model in self.client_models]
-        self.public_devices = [client_model.device for client_model in self.public_client_models]
+        self.public_devices = [
+            client_model.device for client_model in self.public_client_models
+        ]
         self.total_grad = 0
         self.selected_clients = []
         self.updates = []
         self.momentum = 0
         self.swa_model = None
+        self.public_data = public_data
+        self.public_data_size = len(public_data["x"])
+        self.PublicDataset = PublicDataset
 
     #################### METHODS FOR FEDERATED ALGORITHM ####################
 
@@ -52,7 +58,12 @@ class FedMdServer:
         ]
 
     def train_model(
-        self, num_epochs=1, batch_size=10, minibatch=None, clients=None, pre_training=False
+        self,
+        num_epochs=1,
+        batch_size=10,
+        minibatch=None,
+        clients=None,
+        pre_training=False,
     ):
         """Trains self.models on given clients.
 
@@ -84,7 +95,6 @@ class FedMdServer:
             }
             for c in clients
         }
-        
         if pre_training:
             print(f"{'*'*10} Pre-training public started {'*'*10}")
             pre_trained_models = {}
@@ -94,7 +104,10 @@ class FedMdServer:
                     all_models_trained = True
                     break
                 if c.model_index not in pre_trained_models:
-                    model_without_last_layer, losses = c.pre_train(num_epochs)
+                    loader = self.get_loader(5000)
+                    model_without_last_layer, losses = c.pre_train(
+                        loader=loader, num_epochs=num_epochs
+                    )
                     pre_trained_models[c.model_index] = model_without_last_layer
             assert all_models_trained, "Not all models are trained"
             print(f"{'*'*10} Updating clients {'*'*10}")
@@ -103,12 +116,23 @@ class FedMdServer:
             print(f"{'*'*10} Pre-training public ended {'*'*10}")
 
         print(f"{'*'*10} Train started {'*'*10}")
+
         for c in clients:
             num_samples, update = c.train(num_epochs, batch_size, minibatch)
             sys_metrics = self._update_sys_metrics(c, sys_metrics)
             self.updates.append((num_samples, copy.deepcopy(update)))
         print(f"{'*'*10} Train ended {'*'*10}")
         return sys_metrics
+
+    def get_loader(self, size):
+        public_loader = self.PublicDataset(
+            self.public_data,
+        )
+        public_data_indexes = list(range(self.public_data_size))
+        np.random.shuffle(public_data_indexes)
+        # loader = Subset(public_loader, public_data_indexes[:size])
+        public_sampler = SubsetRandomSampler(public_data_indexes[:size])
+        return DataLoader(dataset=public_loader, sampler=public_sampler) 
 
     def _update_sys_metrics(self, c, sys_metrics):
         if isinstance(c.model, torch.nn.DataParallel):
@@ -123,7 +147,7 @@ class FedMdServer:
         sys_metrics[c.id][CLIENT_TASK_KEY] = c.get_task_info()
         return sys_metrics
 
-    def test_model(self, clients_to_test, batch_size, set_to_use="test"):
+    def test_model(self, clients_to_test, set_to_use="test"):
         """Tests models.
 
         Tests model on self.selected_clients if clients_to_test=None.
@@ -137,11 +161,13 @@ class FedMdServer:
 
         if clients_to_test is None:
             clients_to_test = self.selected_clients
-
+        loader = None
+        if set_to_use == "public":
+            loader = self.get_loader(5000)
         for client in clients_to_test:
             client.model_index
-            c_metrics = client.test(batch_size, set_to_use)
-            c_metrics = {'model': client.model_index, **c_metrics}
+            c_metrics = client.test(set_to_use=set_to_use, loader=loader)
+            c_metrics = {"model": client.model_index, **c_metrics}
             metrics[client.id] = c_metrics
 
         return metrics
@@ -153,6 +179,11 @@ class FedMdServer:
 
         # Average updates (fedavg)
         # todo implement update
+
+        clients = self.selected_clients
+        loader = self.get_loader(5000)
+        for c in clients:
+            c.test(set_to_use="public", loader=loader)
 
         self.models = [
             copy.deepcopy(client_model.state_dict())
@@ -242,7 +273,10 @@ class FedMdServer:
         return ckpt_path
 
     def save_all(self, clients, path):
-        models = {f"client_{client.model_index}_model": client.model.state_dict() for client in clients}
+        models = {
+            f"client_{client.model_index}_model": client.model.state_dict()
+            for client in clients
+        }
         torch.save(models, path)
 
     def load_all(self, clients, path):

@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import os
 import torch
 import wandb
+from utils.model_utils import read_public_data
 
 
 def create_paths(args, current_time, alpha=None, resume=False):
@@ -92,7 +93,12 @@ def check_init_paths(paths):
 
 
 def define_server_params(
-    args, client_models: list, public_client_models: list, server_name, opt_ckpt
+    args,
+    client_models: list,
+    public_client_models: list,
+    server_name,
+    opt_ckpt,
+    PublicDataset=None,
 ):
     if server_name == "fedavg":
         server_params = {"client_model": client_models[0]}
@@ -105,9 +111,20 @@ def define_server_params(
             "opt_ckpt": opt_ckpt if opt_ckpt else None,
         }
     elif server_name == "fedmd":
+        public_data_dir = os.path.join(
+            "..", "data", args.publicdataset, "data", "train"
+        )
+        data = read_public_data(public_data_dir, args.alpha)
+        values = data.values()
+        public_data = {"x": [], "y": []}
+        for client in values:
+            public_data["x"].extend(client.get("x"))
+            public_data["y"].extend(client.get("y"))
         server_params = {
             "client_models": client_models,
             "public_client_models": public_client_models,
+            "public_data": public_data,
+            "PublicDataset": PublicDataset,
         }
     else:
         raise NotImplementedError
@@ -228,4 +245,3 @@ def get_plots_name(args, current_time, alpha=None):
             + current_time
         )
     return img_name_val, img_name_test
-

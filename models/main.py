@@ -137,8 +137,8 @@ def main():
         public_models,
         args.algorithm,
         opt_ckpt=args.load and checkpoint.get("opt_state_dict"),
+        PublicDataset=PublicDataset,
     )
-    print(server_params)
     server = Server(**server_params)
 
     start_round = 0 if not args.load else checkpoint["round"]
@@ -267,7 +267,6 @@ def main():
             # Todo implement for multiple models
             # for model in server.client_models:
             #     log_gradient_information(-1, server, model, public=True)
-        quit()
         save_models(
             -1,
             num_rounds,
@@ -280,7 +279,6 @@ def main():
             swa_n,
             file,
         )
-    quit()
     wandb.log({"round": start_round}, commit=True)
     # Start training
     for i in range(start_round, num_rounds):
@@ -296,14 +294,22 @@ def main():
         select_clients(i, server, train_clients, clients_per_round, args)
 
         ##### Simulate servers model training on selected clients' data #####
+        if args.model == "destillation":
+            update_server(i, server, args, swa_n)
 
-        sys_metrics = server.train_model(
-            num_epochs=args.num_epochs,
-            batch_size=args.batch_size,
-            minibatch=args.minibatch,
-        )
+            sys_metrics = server.train_model(
+                num_epochs=args.num_epochs,
+                batch_size=args.batch_size,
+                minibatch=args.minibatch,
+            )
+        else:
+            sys_metrics = server.train_model(
+                num_epochs=args.num_epochs,
+                batch_size=args.batch_size,
+                minibatch=args.minibatch,
+            )
 
-        update_server(i, server, args, swa_n)
+            update_server(i, server, args, swa_n)
 
         if args.model == "destillation":
 
@@ -404,7 +410,6 @@ def create_clients(
     ClientDataset,
     Client,
     public_models=None,
-    public_data=None,
     PublicDataset=None,
     run=None,
     device=None,
@@ -417,13 +422,12 @@ def create_clients(
 
     for u in users:
         client = 0
-        if len(clients_models) > 1 and public_models and PublicDataset and public_data:
+        if len(clients_models) > 1 and public_models and PublicDataset:
             if model_index is None:
                 client = int(u) % 5
             else:
                 client = model_index
             client_params["public_model"] = public_models[client]
-            client_params["public_data"] = PublicDataset(public_data)
             client_params["share_model"] = False
 
         client_params["model"] = clients_models[client]
@@ -462,17 +466,6 @@ def setup_clients(
     """
     train_data_dir = os.path.join("..", "data", args.dataset, "data", "train")
     test_data_dir = os.path.join("..", "data", args.dataset, "data", "test")
-    public_data = None
-    if args.publicdataset:
-        public_data_dir = os.path.join(
-            "..", "data", args.publicdataset, "data", "train"
-        )
-        data = read_public_data(public_data_dir, args.alpha)
-        values = data.values()
-        public_data = {"x": [], "y": []}
-        for client in values:
-            public_data["x"].extend(client.get("x"))
-            public_data["y"].extend(client.get("y"))
 
     (
         train_users,
@@ -493,7 +486,6 @@ def setup_clients(
         Client,
         run=run,
         device=device,
-        public_data=public_data,
         public_models=public_models,
         PublicDataset=PublicDataset,
     )
@@ -511,7 +503,6 @@ def setup_clients(
                 Client,
                 run=run,
                 device=device,
-                public_data=public_data,
                 public_models=public_models,
                 PublicDataset=PublicDataset,
                 model_index=model_index,
@@ -637,17 +628,21 @@ def print_stats(
     model=0,
 ):
     train_stat_metrics = server.test_model(
-        train_clients, args.batch_size, set_to_use="train"
+        train_clients, set_to_use="train"
     )
     val_metrics, val_metrics_names = print_metrics(
         train_stat_metrics, train_num_samples, fp, prefix="train_", model=model
     )
 
     test_stat_metrics = server.test_model(
-        test_clients, args.batch_size, set_to_use="test"
+        test_clients, set_to_use="test"
     )
-    test_metrics, test_metrics_names= print_metrics(
-        test_stat_metrics, test_num_samples, fp, prefix="{}_".format("test"), model=model
+    test_metrics, test_metrics_names = print_metrics(
+        test_stat_metrics,
+        test_num_samples,
+        fp,
+        prefix="{}_".format("test"),
+        model=model,
     )
     wandb.log(
         {

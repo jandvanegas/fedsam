@@ -19,3 +19,4 @@ models/wandb
 data
 models/results/
 wandb/
+models/pretrain*

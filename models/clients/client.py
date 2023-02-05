@@ -5,7 +5,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import warnings
-from torch.utils.data import RandomSampler
 from baseline_constants import ACCURACY_KEY
 
 
@@ -27,7 +26,6 @@ class Client:
         mixup=False,
         mixup_alpha=1.0,
         model_index=None,
-        public_data=None,
         public_model=None,
         share_model=True,
     ):
@@ -41,7 +39,6 @@ class Client:
         self.id = client_id
         self.train_data = train_data
         self.eval_data = eval_data
-        self.public_data = public_data
         self.trainloader = (
             torch.utils.data.DataLoader(
                 train_data, batch_size=batch_size, shuffle=True, num_workers=num_workers
@@ -56,17 +53,6 @@ class Client:
             if self.eval_data.__len__() != 0
             else None
         )
-        self.publicloader = (
-            torch.utils.data.DataLoader(
-                public_data,
-                batch_size=batch_size,
-                shuffle=False,
-                num_workers=num_workers,
-            )
-            if self.public_data is not None
-            else None
-        )
-        self.public_data = public_data
         self._classes = self._client_labels()
         self.num_samples_per_class = self.number_of_samples_per_class()
         self.seed = seed
@@ -81,7 +67,7 @@ class Client:
         self.mixup_alpha = mixup_alpha  # α controls the strength of interpolation between feature-target pairs
         self.model_index = model_index
 
-    def pre_train(self, num_epochs=1):
+    def pre_train(self, loader, num_epochs=1):
         """Pretrains on self.model using the client's train_data.
 
         Args:
@@ -108,10 +94,12 @@ class Client:
             self.public_model.train()
             if self.mixup:
                 losses[epoch] = self.run_epoch_with_mixup(
-                    optimizer, criterion, public=True
+                    optimizer, criterion, public=True, loader=loader
                 )
             else:
-                losses[epoch] = self.run_epoch(optimizer, criterion, public=True)
+                losses[epoch] = self.run_epoch(
+                    optimizer, criterion, public=True, loader=loader
+                )
 
         public_model = copy.deepcopy(self.public_model.state_dict())
         return public_model, losses
@@ -124,7 +112,11 @@ class Client:
         }
         self.model.load_state_dict(without_last_layer)
 
-    def train(self, num_epochs=1, batch_size=10, minibatch=None, pre_training=False):
+    def train(
+        self,
+        num_epochs=1,
+        loader=None,
+    ):
         """Trains on self.model using the client's train_data.
 
         Args:
@@ -137,6 +129,7 @@ class Client:
             update: state dictionary of the trained model
         """
         # Train model
+        print("Training on client", self.id)
         criterion = nn.CrossEntropyLoss().to(self.device)
         optimizer = optim.SGD(
             self.model.parameters(),
@@ -149,15 +142,17 @@ class Client:
         for epoch in range(num_epochs):
             self.model.train()
             if self.mixup:
-                losses[epoch] = self.run_epoch_with_mixup(optimizer, criterion)
+                losses[epoch] = self.run_epoch_with_mixup(
+                    optimizer, criterion, loader=loader
+                )
             else:
-                losses[epoch] = self.run_epoch(optimizer, criterion)
+                losses[epoch] = self.run_epoch(optimizer, criterion, loader=loader)
 
         self.losses = losses
         update = self.model.state_dict()
         return self.num_train_samples, update
 
-    def run_epoch(self, optimizer, criterion, public=False):
+    def run_epoch(self, optimizer, criterion, public=False, loader=None):
         """Runs single training epoch of self.model on client's data.
 
         Return:
@@ -167,12 +162,7 @@ class Client:
         i = 0
         if not public:
             loader = self.trainloader
-        else:
-            assert self.publicloader is not None
-            public_data_size = len(self.publicloader)
-            public_data_indexes = list(range(public_data_size))
-            loader = RandomSampler(public_data_indexes, num_samples=len(self.publicloader))
-        loader = self.publicloader if public else self.trainloader
+        assert loader is not None
         model = self.public_model if public else self.model
         assert loader is not None and model is not None
         for _, data in enumerate(loader):
@@ -191,10 +181,11 @@ class Client:
             return 0
         return running_loss / i
 
-    def run_epoch_with_mixup(self, optimizer, criterion, public=False):
+    def run_epoch_with_mixup(self, optimizer, criterion, public=False, loader=None):
         running_loss = 0.0
         i = 0
-        loader = self.publicloader if public else self.trainloader
+        if not public:
+            loader = self.trainloader
         model = self.public_model if public else self.model
         assert loader is not None and model is not None
         for _, data in enumerate(loader):
@@ -228,7 +219,7 @@ class Client:
     def mixup_criterion(self, criterion, pred, y_a, y_b, lam):
         return lam * criterion(pred, y_a) + (1 - lam) * criterion(pred, y_b)
 
-    def test(self, batch_size, set_to_use="test"):
+    def test(self, set_to_use="test", loader=None):
         """Tests self.model on self.test_data.
 
         Args:
@@ -236,11 +227,13 @@ class Client:
         Return:
             dict of metrics returned by the model.
         """
-        assert set_to_use in ["train", "test", "val"]
+        assert set_to_use in ["train", "test", "val", "public"]
         if set_to_use == "train":
             dataloader = self.trainloader
         elif set_to_use == "test" or set_to_use == "val":
             dataloader = self.testloader
+        elif set_to_use == "public":
+            dataloader = loader
 
         self.model.eval()
         correct = 0
