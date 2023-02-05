@@ -229,7 +229,6 @@ def main():
             server.save_all(train_clients, "./pretraining")
         quit()
 
-        server.update_model()
         accuracy = test_model(
             -1,
             eval_every,
@@ -549,7 +548,7 @@ def init_wandb(args, alpha=None, run_id=None):
     run = wandb.init(
         id=id,
         # Set entity to specify your username or team name
-        entity="federated-learning",
+        entity="jandvanegas",
         # Set the project where this run will be logged
         project="fl_" + args.dataset,
         group=group_name,

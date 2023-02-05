@@ -139,13 +139,9 @@ class FedMdServer:
             clients_to_test = self.selected_clients
 
         for client in clients_to_test:
-            model = self.client_models[client.model_index]
-            # TODO implement load_state_dict
-            # if self.swa_model is None:
-            #     client.model.load_state_dict(model)
-            # else:
-            #     client.model.load_state_dict(self.swa_model.state_dict())
+            client.model_index
             c_metrics = client.test(batch_size, set_to_use)
+            c_metrics = {'model': client.model_index, **c_metrics}
             metrics[client.id] = c_metrics
 
         return metrics
