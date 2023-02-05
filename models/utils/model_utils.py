@@ -49,6 +49,11 @@ def read_dir(data_dir, alpha=None):
     return clients, groups, data
 
 
+def read_public_data(public_train_data, alpha=None):
+    _, _, public_data = read_dir(public_train_data, alpha)
+
+    return public_data
+
 def read_data(train_data_dir, test_data_dir, alpha=None):
     '''parses data in given train and test data directories
 

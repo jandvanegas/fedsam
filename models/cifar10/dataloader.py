@@ -14,12 +14,13 @@ IMAGES_DIR = os.path.join('..', 'data', 'cifar10', 'data', 'raw', 'img')
 class ClientDataset(Dataset):
     """ CIFAR10 Dataset """
 
-    def __init__(self, data, train=True, loading='training_time', cutout=None):
+    def __init__(self, data, train=True, loading='training_time', cutout=None, sampler=None):
         """
         Args:
             data: dictionary in the form {'x': list of imgs ids, 'y': list of correspondings labels}
             train (bool, optional): boolean for distinguishing between client's train and test data
         """
+        self.sampler = sampler
         self.root_dir = IMAGES_DIR
         self.imgs = []
         self.labels = []
@@ -27,7 +28,6 @@ class ClientDataset(Dataset):
 
         if data is None:
             return
-
         for img_name, label in zip(data['x'], data['y']):
             if loading == 'training_time':
                 self.imgs.append(img_name)

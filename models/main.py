@@ -19,7 +19,7 @@ from baseline_constants import (
 from utils.args import parse_args, check_args
 from utils.cutout import Cutout
 from utils.main_utils import *
-from utils.model_utils import read_data
+from utils.model_utils import read_data, read_public_data
 
 os.environ["WANDB_API_KEY"] = ""
 os.environ["WANDB_MODE"] = "offline"
@@ -87,9 +87,9 @@ def main():
 
     checkpoint = {}
     client_models = []
-    public_client_models = []
+    public_models = []
     client_path = f"clients.{client_sufix}"
-    PublicClientDataset = None
+    PublicDataset = None
     mod = importlib.import_module(model_path)
     dataset = importlib.import_module(dataset_path)
     ClientDataset = getattr(dataset, "ClientDataset")
@@ -98,7 +98,7 @@ def main():
         publicdataset_path = "%s.%s" % (args.publicdataset, "dataloader")
         publicdataset = importlib.import_module(publicdataset_path)
         publicmod = importlib.import_module(publicmodel_path)
-        PublicClientDataset = getattr(publicdataset, "ClientDataset")
+        PublicDataset = getattr(publicdataset, "ClientDataset")
         print("Running experiment with server", server_path, "and client", client_path)
         client_models = []
         Client, Server = get_clients_and_server(server_path, client_path)
@@ -109,10 +109,10 @@ def main():
             client_model = ClientModel(*model_params, device)
             client_models.append(client_model)
             public_client_model = PublicClientModel(*model_params, device)
-            public_client_models.append(public_client_model)
+            public_models.append(public_client_model)
         assert not args.load, "Not implemented checkpoimws yet"
         client_models = [model.to(device) for model in client_models]
-        public_client_models = [model.to(device) for model in public_client_models]
+        public_models = [model.to(device) for model in public_models]
     else:
         ClientModel = getattr(mod, "ClientModel")
         print("Running experiment with server", server_path, "and client", client_path)
@@ -135,7 +135,7 @@ def main():
     server_params = define_server_params(
         args,
         client_models,
-        public_client_models,
+        public_models,
         args.algorithm,
         opt_ckpt=args.load and checkpoint.get("opt_state_dict"),
     )
@@ -147,7 +147,14 @@ def main():
 
     #### Create and set up clients ####
     train_clients, test_clients = setup_clients(
-        args, client_models, Client, ClientDataset, run, device, public=False
+        args,
+        client_models,
+        public_models,
+        Client,
+        ClientDataset,
+        PublicDataset,
+        run,
+        device,
     )
     train_client_ids, train_client_num_samples = server.get_clients_info(train_clients)
     test_client_ids, test_client_num_samples = server.get_clients_info(test_clients)
@@ -155,35 +162,9 @@ def main():
         print("Clients in Total: %d" % len(train_clients))
     else:
         print(
-            f"Public Clients in Total: {len(train_clients)} training clients and {len(test_clients)} test clients"
+            f"Clients in Total: {len(train_clients)} training clients and {len(test_clients)} test clients"
         )
     server.set_num_clients(len(train_clients))
-    if args.model == "destillation":
-
-        public_train_clients, public_test_clients = setup_clients(
-            args,
-            public_client_models,
-            Client,
-            PublicClientDataset,
-            run,
-            device,
-            public=True,
-        )
-        (
-            public_train_client_ids,
-            public_train_client_num_samples,
-        ) = server.get_clients_info(public_train_clients)
-        (
-            public_test_client_ids,
-            public_test_client_num_samples,
-        ) = server.get_clients_info(public_test_clients)
-        if set(public_train_client_ids) == set(public_test_client_ids):
-            print("Clients in Total: %d" % len(public_train_clients))
-        else:
-            print(
-                f"Clients in Total: {len(public_train_clients)} training clients and {len(public_test_clients)} test clients"
-            )
-        server.set_num_public_clients(len(public_train_clients))
 
     # Initial status
     print("--- Random Initialization ---")
@@ -215,18 +196,6 @@ def main():
         fp,
     )
 
-    if args.model == "destillation":
-        print_stats(
-            start_round,
-            server,
-            public_train_clients,
-            public_train_client_num_samples,
-            public_test_clients,
-            public_test_client_num_samples,
-            args,
-            fp,
-            public=True,
-        )
 
     wandb.log({"round": start_round}, commit=True)
     ## Setup SWA
@@ -241,6 +210,55 @@ def main():
             swa_n = checkpoint["swa_n"]
             print("SWA n:", swa_n)
         print("SWA starts @ round:", args.swa_start)
+    # Start pretraining
+
+    if args.model == "destillation":
+        print(f"{'*'*10}Starting pretraining{'*'*10}")
+
+        if os.path.exists("./pretraining"):
+            print(f"{'*'*10}Pretraining already done{'*'*10}")
+            server.load_all(train_clients, "./pretraining")
+        else:
+            server.train_model(
+                num_epochs=args.num_epochs,
+                batch_size=args.batch_size,
+                minibatch=args.minibatch,
+                clients=train_clients,
+                pre_training=True,
+            )
+            server.save_all(train_clients, "./pretraining")
+        quit()
+
+        server.update_model()
+        accuracy = test_model(
+            -1,
+            eval_every,
+            num_rounds,
+            server,
+            train_clients,
+            train_client_num_samples,
+            test_clients,
+            test_client_num_samples,
+            args,
+            fp,
+        )
+        if accuracy is not None:
+            last_accuracies.append(accuracy)
+
+        for model in server.client_models:
+            log_gradient_information(-1, server, model, public=True)
+        save_models(
+            -1,
+            num_rounds,
+            server,
+            args,
+            ckpt_path,
+            ckpt_name,
+            job_name,
+            current_time,
+            swa_n,
+            file,
+        )
 
     # Start training
     for i in range(start_round, num_rounds):
@@ -253,45 +271,6 @@ def main():
             % (i + 1, num_rounds, clients_per_round)
         )
 
-        if args.model == "destillation":
-            select_clients(i, server, public_train_clients, clients_per_round, args)
-            # Train public data
-            sys_metrics = server.train_model(
-                num_epochs=args.num_epochs,
-                batch_size=args.batch_size,
-                minibatch=args.minibatch,
-            )
-            update_server(i, server, args, swa_n)
-
-            accuracy = test_model(
-                i,
-                eval_every,
-                num_rounds,
-                server,
-                train_clients,
-                train_client_num_samples,
-                test_clients,
-                test_client_num_samples,
-                args,
-                fp,
-            )
-            if accuracy is not None:
-                last_accuracies.append(accuracy)
-
-            for model in server.client_models:
-                log_gradient_information(i, server, model, public=True)
-            save_models(
-                i,
-                num_rounds,
-                server,
-                args,
-                ckpt_path,
-                ckpt_name,
-                job_name,
-                current_time,
-                swa_n,
-                file,
-            )
 
         select_clients(i, server, train_clients, clients_per_round, args)
 
@@ -319,7 +298,7 @@ def main():
         )
         if accuracy is not None:
             last_accuracies.append(accuracy)
-        
+
         if hasattr(server, "client_models"):
             for model in server.client_models:
                 log_gradient_information(i, server, model, public=False)
@@ -376,6 +355,9 @@ def create_clients(
     args,
     ClientDataset,
     Client,
+    public_models=None,
+    public_data=None,
+    PublicDataset=None,
     run=None,
     device=None,
 ):
@@ -383,10 +365,14 @@ def create_clients(
     client_params = define_client_params(args.client_algorithm, args)
     client_params["run"] = run
     client_params["device"] = device
+
     for u in users:
         client = 0
-        if len(clients_models) > 1:
+        if len(clients_models) > 1 and public_models and PublicDataset and public_data:
             client = int(u) % 5
+            client_params["public_model"] = public_models[client]
+            client_params["public_data"] = PublicDataset(public_data)
+            client_params["share_model"] = False
 
         client_params["model"] = clients_models[client]
         client_params["model_index"] = client
@@ -410,23 +396,31 @@ def create_clients(
 def setup_clients(
     args,
     models,
+    public_models,
     Client,
     ClientDataset,
+    PublicDataset,
     run=None,
     device=None,
-    public=False,
 ):
     """Instantiates clients based on given train and test data directories.
 
     Return:
         all_clients: list of Client objects.
     """
-    if not public:
-        train_data_dir = os.path.join("..", "data", args.dataset, "data", "train")
-        test_data_dir = os.path.join("..", "data", args.dataset, "data", "test")
-    else:
-        train_data_dir = os.path.join("..", "data", args.publicdataset, "data", "train")
-        test_data_dir = os.path.join("..", "data", args.publicdataset, "data", "test")
+    train_data_dir = os.path.join("..", "data", args.dataset, "data", "train")
+    test_data_dir = os.path.join("..", "data", args.dataset, "data", "test")
+    public_data = None
+    if args.publicdataset:
+        public_data_dir = os.path.join(
+            "..", "data", args.publicdataset, "data", "train"
+        )
+        data = read_public_data(public_data_dir, args.alpha)
+        values = data.values()
+        public_data = {'x': [], 'y': []}
+        for client in values:
+            public_data['x'].extend(client.get('x'))
+            public_data['y'].extend(client.get('y'))
 
     (
         train_users,
@@ -445,8 +439,11 @@ def setup_clients(
         args,
         ClientDataset,
         Client,
-        run,
-        device,
+        run=run,
+        device=device,
+        public_data=public_data,
+        public_models=public_models,
+        PublicDataset=PublicDataset,
     )
     test_clients = create_clients(
         test_users,
@@ -456,8 +453,11 @@ def setup_clients(
         args,
         ClientDataset,
         Client,
-        run,
-        device,
+        run=run,
+        device=device,
+        public_data=public_data,
+        public_models=public_models,
+        PublicDataset=PublicDataset,
     )
 
     return train_clients, test_clients

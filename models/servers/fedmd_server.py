@@ -52,7 +52,7 @@ class FedMdServer:
         ]
 
     def train_model(
-        self, num_epochs=1, batch_size=10, minibatch=None, clients=None, public=False
+        self, num_epochs=1, batch_size=10, minibatch=None, clients=None, pre_training=False
     ):
         """Trains self.models on given clients.
 
@@ -84,12 +84,30 @@ class FedMdServer:
             }
             for c in clients
         }
+        
+        if pre_training:
+            print(f"{'*'*10} Pre-training public started {'*'*10}")
+            pre_trained_models = {}
+            all_models_trained = False
+            for c in clients:
+                if len(pre_trained_models) == 5:
+                    all_models_trained = True
+                    break
+                if c.model_index not in pre_trained_models:
+                    model_without_last_layer, losses = c.pre_train(num_epochs)
+                    pre_trained_models[c.model_index] = model_without_last_layer
+            assert all_models_trained, "Not all models are trained"
+            print(f"{'*'*10} Updating clients {'*'*10}")
+            for c in clients:
+                c.update_pretrained_model(pre_trained_models[c.model_index])
+            print(f"{'*'*10} Pre-training public ended {'*'*10}")
 
+        print(f"{'*'*10} Train started {'*'*10}")
         for c in clients:
             num_samples, update = c.train(num_epochs, batch_size, minibatch)
             sys_metrics = self._update_sys_metrics(c, sys_metrics)
             self.updates.append((num_samples, copy.deepcopy(update)))
-
+        print(f"{'*'*10} Train ended {'*'*10}")
         return sys_metrics
 
     def _update_sys_metrics(self, c, sys_metrics):
@@ -226,3 +244,12 @@ class FedMdServer:
             save_info["swa_n"] = swa_n
         torch.save(save_info, ckpt_path)
         return ckpt_path
+
+    def save_all(self, clients, path):
+        models = {f"client_{client.model_index}_model": client.model.state_dict() for client in clients}
+        torch.save(models, path)
+
+    def load_all(self, clients, path):
+        models = torch.load(path)
+        for client in clients:
+            client.model.load_state_dict(models[f"client_{client.model_index}_model"])

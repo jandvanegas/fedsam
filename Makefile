@@ -16,4 +16,4 @@ all_at_once:
 	make training method=run_fedasam_with_swa
 
 train_fedmd:
-	cd ./models; python main.py --num-rounds 10 --eval-every 100 --batch-size 64 --num-epochs 1 --clients-per-round 5 -model destillation -lr 0.01 --weight-decay 0.0004 -device cuda:0 -algorithm fedmd --server-lr 1 --server-opt sgd --num-workers 0 --where-loading init -dataset cifar10 --publicdataset cifar100 -alpha $(alpha)
+	cd ./models; python main.py --num-rounds 10 --eval-every 100 --batch-size 64 --num-epochs 1 --clients-per-round 5 -model destillation -lr 0.01 --weight-decay 0.0004 -device cuda:0 -algorithm fedmd --server-lr 1 --server-opt sgd --num-workers 0 --where-loading init -dataset cifar100 --publicdataset cifar10 -alpha $(alpha)
