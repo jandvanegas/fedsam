@@ -397,7 +397,7 @@ def main():
                     "model": c.model.state_dict(),
                     "public_model": c.model.state_dict(),
                 }
-                for c in server.selected_clients
+                for c in train_clients
                 if int(c.id) in [0, 1, 2, 3, 4]
             },
         )
@@ -459,7 +459,7 @@ def create_clients(
             else:
                 client = model_index
             client_params["public_model"] = public_models[client]
-            client_params["share_model"] = False
+            client_params["share_model"] = True
 
         client_params["model"] = clients_models[client]
         client_params["model_index"] = client
