@@ -1,5 +1,6 @@
 """Script to run the baselines."""
 import importlib
+from pprint import pprint
 import inspect
 import numpy as np
 import os
@@ -141,29 +142,42 @@ def main():
     )
     server = Server(**server_params)
 
-    start_round = 0 if not args.load else checkpoint["round"]
-    print("Start round:", start_round)
 
     #### Create and set up clients ####
-    train_clients, test_clients = setup_clients(
-        args,
-        client_models,
-        public_models,
-        Client,
-        ClientDataset,
-        PublicDataset,
-        run,
-        device,
-    )
-    train_client_ids, train_client_num_samples = server.get_clients_info(train_clients)
-    test_client_ids, test_client_num_samples = server.get_clients_info(test_clients)
-    if set(train_client_ids) == set(test_client_ids):
-        print("Clients in Total: %d" % len(train_clients))
-    else:
-        print(
-            f"Clients in Total: {len(train_clients)} training clients and {len(test_clients)} test clients"
+    if args.model == "destillation":
+        train_clients, _ = setup_clients(
+            args,
+            client_models,
+            public_models,
+            Client,
+            ClientDataset,
+            PublicDataset,
+            run,
+            device,
         )
-    server.set_num_clients(len(train_clients))
+        train_client_ids, train_client_num_samples = server.get_clients_info(train_clients)
+        print("Clients in Total: %d" % len(train_clients))
+        server.set_num_clients(len(train_clients))
+    else: 
+        train_clients, test_clients = setup_clients(
+            args,
+            client_models,
+            public_models,
+            Client,
+            ClientDataset,
+            PublicDataset,
+            run,
+            device,
+        )
+        train_client_ids, train_client_num_samples = server.get_clients_info(train_clients)
+        test_client_ids, test_client_num_samples = server.get_clients_info(test_clients)
+        if set(train_client_ids) == set(test_client_ids):
+            print("Clients in Total: %d" % len(train_clients))
+        else:
+            print(
+                f"Clients in Total: {len(train_clients)} training clients and {len(test_clients)} test clients"
+            )
+        server.set_num_clients(len(train_clients))
 
     # Initial status
     print("--- Random Initialization ---")
@@ -185,22 +199,9 @@ def main():
     last_accuracies = {}
 
     if args.model == "destillation":
+
         train_clients_by_model = server.get_clients_by_model(train_clients)
-        test_clients_by_model = server.get_clients_by_model(test_clients)
-        for model_index in range(5):
-            train_model_clients = train_clients_by_model[model_index]
-            test_model_clients = test_clients_by_model[model_index]
-            print_stats(
-                start_round,
-                server,
-                train_model_clients,
-                server.get_clients_info(train_model_clients)[1],
-                test_model_clients,
-                server.get_clients_info(test_model_clients)[1],
-                args,
-                fp,
-                model=model_index,
-            )
+        pass
     else:
         print_stats(
             start_round,
@@ -233,7 +234,7 @@ def main():
         print(f"{'*'*10}Starting pretraining from/to {pretraning_path}{'*'*10}")
         if os.path.exists(pretraning_path):
             print(f"{'*'*10}Pretraining already done{'*'*10}")
-            server.load_all(train_clients, pretraning_path)
+            server.load_all(train_clients, f"{pretraning_path}")
         else:
             server.train_model(
                 num_epochs=args.num_epochs,
@@ -242,10 +243,12 @@ def main():
                 clients=train_clients,
                 pre_training=True,
             )
-            server.save_all(train_clients, pretraning_path)
+            server.save_all(train_clients, f"{pretraning_path}")
         for model_index in range(5):
-            train_model_clients = train_clients_by_model[model_index]
-            test_model_clients = test_clients_by_model[model_index]
+            # model_clients = train_clients_by_model[model_index]
+            train_clients_for_this_model = train_clients_by_model[model_index]
+            train_model_clients = [c for c in train_clients_for_this_model if int(c.id) not in [0, 1, 2, 3, 4]]
+            test_model_clients = [c for c in train_clients_for_this_model if int(c.id) in [0, 1, 2, 3, 4]]
             accuracy = test_model(
                 -1,
                 eval_every,
@@ -259,6 +262,7 @@ def main():
                 fp,
                 model=model_index,
             )
+            
             if accuracy is not None:
                 if model_index in last_accuracies:
                     last_accuracies[model_index].append(accuracy)
@@ -266,19 +270,24 @@ def main():
                     last_accuracies[model_index] = [accuracy]
             # Todo implement for multiple models
             # for model in server.client_models:
+
             #     log_gradient_information(-1, server, model, public=True)
-        save_models(
-            -1,
-            num_rounds,
-            server,
-            args,
-            ckpt_path,
-            ckpt_name,
-            job_name,
-            current_time,
-            swa_n,
-            file,
-        )
+        pprint(last_accuracies)
+        # save_models(
+        #     -1,
+        #     num_rounds,
+        #     server,
+        #     args,
+        #     ckpt_path,
+        #     ckpt_name,
+        #     job_name,
+        #     current_time,
+        #     swa_n,
+        #     file,
+        # )
+    quit()
+    start_round = 0 if not args.load else checkpoint["round"]
+    print("Start round:", start_round)
     wandb.log({"round": start_round}, commit=True)
     # Start training
     for i in range(start_round, num_rounds):
@@ -318,15 +327,17 @@ def main():
             )
             test_clients_by_model = server.get_clients_by_model(test_clients)
             for model_index in range(5):
+                train_model_clients = train_clients_by_model[model_index]
+                test_model_clients = test_clients_by_model[model_index]
                 accuracy = test_model(
                     -1,
                     eval_every,
                     num_rounds,
                     server,
-                    train_clients_by_model[model_index],
-                    train_client_num_samples,
-                    test_clients_by_model[model_index],
-                    test_client_num_samples,
+                    train_model_clients,
+                    server.get_clients_info(train_model_clients)[1],
+                    test_model_clients,
+                    server.get_clients_info(test_model_clients)[1],
                     args,
                     fp,
                     model=model_index,
@@ -336,7 +347,6 @@ def main():
                         last_accuracies[model_index].append(accuracy)
                     else:
                         last_accuracies[model_index] = [accuracy]
-
         else:
             accuracy = test_model(
                 i,
@@ -358,30 +368,30 @@ def main():
                 log_gradient_information(i, server, model, public=False)
         else:
             log_gradient_information(i, server)
-        save_models(
-            i,
-            num_rounds,
-            server,
-            args,
-            ckpt_path,
-            ckpt_name,
-            job_name,
-            current_time,
-            swa_n,
-            file,
-        )
+        # save_models(
+        #     i,
+        #     num_rounds,
+        #     server,
+        #     args,
+        #     ckpt_path,
+        #     ckpt_name,
+        #     job_name,
+        #     current_time,
+        #     swa_n,
+        #     file,
+        # )
 
     ## FINAL ANALYSIS ##
-    where_saved = server.save_model(
-        num_rounds,
-        os.path.join(
-            ckpt_path,
-            "round:" + str(num_rounds) + "_" + job_name + "_" + current_time + ".ckpt",
-        ),
-    )
-    wandb.save(where_saved)
-    print("Checkpoint saved in path: %s" % where_saved)
-
+    # where_saved = server.save_model(
+    #     num_rounds,
+    #     os.path.join(
+    #         ckpt_path,
+    #         "round:" + str(num_rounds) + "_" + job_name + "_" + current_time + ".ckpt",
+    #     ),
+    # # )
+    # wandb.save(where_saved)
+    # print("Checkpoint saved in path: %s" % where_saved)
+    #
     if last_accuracies:
         avg_acc = sum(last_accuracies) / len(last_accuracies)
         print("Last {:d} rounds accuracy: {:.3f}".format(len(last_accuracies), avg_acc))
@@ -476,37 +486,56 @@ def setup_clients(
         test_data,
     ) = read_data(train_data_dir, test_data_dir, args.alpha)
 
-    train_clients = create_clients(
-        train_users,
-        train_data,
-        test_data,
-        models,
-        args,
-        ClientDataset,
-        Client,
-        run=run,
-        device=device,
-        public_models=public_models,
-        PublicDataset=PublicDataset,
-    )
-    test_clients = []
-    # todo improve to be valid with other training
-    for model_index in range(5):
-        test_clients.extend(
-            create_clients(
-                test_users,
-                train_data,
-                test_data,
-                models,
-                args,
-                ClientDataset,
-                Client,
-                run=run,
-                device=device,
-                public_models=public_models,
-                PublicDataset=PublicDataset,
-                model_index=model_index,
-            )
+    if args.model == "destillation":
+        # test_data from test users will be used for all clients.
+        # test users are not used.
+        test_data = [v for v in test_data.values() if v is not None]
+        test_data = {u: test_data[0] for u in train_users}
+        clients = create_clients(
+            train_users,
+            train_data,
+            test_data,
+            models,
+            args,
+            ClientDataset,
+            Client,
+            run=run,
+            device=device,
+            public_models=public_models,
+            PublicDataset=PublicDataset,
+        )
+        # we don't test with different clietns given that 
+        # we don't share the same model
+        # we test the same clients on different data
+        # to be test we need the model to be trained in public and private data
+        train_clients = clients
+        test_clients = []
+    else:
+        train_clients = create_clients(
+            train_users,
+            train_data,
+            test_data,
+            models,
+            args,
+            ClientDataset,
+            Client,
+            run=run,
+            device=device,
+            public_models=public_models,
+            PublicDataset=PublicDataset,
+        )
+        test_clients = create_clients(
+            test_users,
+            train_data,
+            test_data,
+            models,
+            args,
+            ClientDataset,
+            Client,
+            run=run,
+            device=device,
+            public_models=public_models,
+            PublicDataset=PublicDataset,
         )
 
     return train_clients, test_clients
@@ -747,7 +776,7 @@ def test_model(
 ):
 
     if (
-        (i + 1) % eval_every == 0 or (i + 1) == num_rounds or (i + 1) > num_rounds - 100
+        i == -1 or (i + 1) % eval_every == 0 or (i + 1) == num_rounds or (i + 1) > num_rounds - 100
     ):  # eval every round in last 100 rounds
         _, test_metrics = print_stats(
             i + 1,

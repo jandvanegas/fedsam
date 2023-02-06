@@ -125,6 +125,8 @@ def define_server_params(
             "public_client_models": public_client_models,
             "public_data": public_data,
             "PublicDataset": PublicDataset,
+            "batch_size": args.batch_size,
+            "num_workers": args.num_workers,
         }
     else:
         raise NotImplementedError

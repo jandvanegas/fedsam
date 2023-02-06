@@ -1,7 +1,7 @@
 import copy
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, random_split, SubsetRandomSampler 
+from torch.utils.data import DataLoader, random_split, SubsetRandomSampler
 from baseline_constants import (
     BYTES_WRITTEN_KEY,
     BYTES_READ_KEY,
@@ -12,7 +12,7 @@ from baseline_constants import (
 
 
 class FedMdServer:
-    def __init__(self, client_models, public_client_models, public_data, PublicDataset):
+    def __init__(self, client_models, public_client_models, public_data, PublicDataset, batch_size, num_workers):
         self.client_models = [
             copy.deepcopy(client_model) for client_model in client_models
         ]
@@ -31,6 +31,8 @@ class FedMdServer:
         self.public_data = public_data
         self.public_data_size = len(public_data["x"])
         self.PublicDataset = PublicDataset
+        self.batch_size = batch_size
+        self.num_workers = num_workers
 
     #################### METHODS FOR FEDERATED ALGORITHM ####################
 
@@ -99,12 +101,12 @@ class FedMdServer:
             print(f"{'*'*10} Pre-training public started {'*'*10}")
             pre_trained_models = {}
             all_models_trained = False
+            loader = self.get_loader(5000)
             for c in clients:
                 if len(pre_trained_models) == 5:
                     all_models_trained = True
                     break
                 if c.model_index not in pre_trained_models:
-                    loader = self.get_loader(5000)
                     model_without_last_layer, losses = c.pre_train(
                         loader=loader, num_epochs=num_epochs
                     )
@@ -118,7 +120,7 @@ class FedMdServer:
         print(f"{'*'*10} Train started {'*'*10}")
 
         for c in clients:
-            num_samples, update = c.train(num_epochs, batch_size, minibatch)
+            num_samples, update = c.train(num_epochs)
             sys_metrics = self._update_sys_metrics(c, sys_metrics)
             self.updates.append((num_samples, copy.deepcopy(update)))
         print(f"{'*'*10} Train ended {'*'*10}")
@@ -132,7 +134,14 @@ class FedMdServer:
         np.random.shuffle(public_data_indexes)
         # loader = Subset(public_loader, public_data_indexes[:size])
         public_sampler = SubsetRandomSampler(public_data_indexes[:size])
-        return DataLoader(dataset=public_loader, sampler=public_sampler) 
+
+        return DataLoader(
+            dataset=public_loader,
+            sampler=public_sampler,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+        )
 
     def _update_sys_metrics(self, c, sys_metrics):
         if isinstance(c.model, torch.nn.DataParallel):
@@ -167,7 +176,6 @@ class FedMdServer:
         for client in clients_to_test:
             client.model_index
             c_metrics = client.test(set_to_use=set_to_use, loader=loader)
-            c_metrics = {"model": client.model_index, **c_metrics}
             metrics[client.id] = c_metrics
 
         return metrics

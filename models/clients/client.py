@@ -165,6 +165,7 @@ class Client:
         assert loader is not None
         model = self.public_model if public else self.model
         assert loader is not None and model is not None
+
         for _, data in enumerate(loader):
             input_data_tensor, target_data_tensor = data[0].to(self.device), data[1].to(
                 self.device
@@ -230,12 +231,15 @@ class Client:
         assert set_to_use in ["train", "test", "val", "public"]
         if set_to_use == "train":
             dataloader = self.trainloader
+            model = self.model
         elif set_to_use == "test" or set_to_use == "val":
+            model = self.model
             dataloader = self.testloader
         elif set_to_use == "public":
             dataloader = loader
+            model = self.public_model
 
-        self.model.eval()
+        model.eval()
         correct = 0
         total = 0
         test_loss = 0
@@ -244,7 +248,7 @@ class Client:
                 self.device
             )
             with torch.no_grad():
-                outputs = self.model(input_tensor)
+                outputs = model(input_tensor)
                 test_loss += F.cross_entropy(
                     outputs, labels_tensor, reduction="sum"
                 ).item()

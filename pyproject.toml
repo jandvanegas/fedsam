@@ -43,6 +43,10 @@ ropevim = "^0.8.1"
 # default = false
 # secondary = true
 
+
+[tool.poetry.group.local.dependencies]
+jupyterlab = "^3.6.1"
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
