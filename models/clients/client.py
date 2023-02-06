@@ -1,10 +1,12 @@
 import copy
+import warnings
+
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-import warnings
+
 from baseline_constants import ACCURACY_KEY
 
 
@@ -243,6 +245,7 @@ class Client:
         correct = 0
         total = 0
         test_loss = 0
+        predictions = []
         for data in dataloader:
             input_tensor, labels_tensor = data[0].to(self.device), data[1].to(
                 self.device
@@ -255,13 +258,14 @@ class Client:
                 _, predicted = torch.max(outputs.data, 1)  # same as torch.argmax()
                 total += labels_tensor.size(0)
                 correct += (predicted == labels_tensor).sum().item()
+                predictions.append(predicted)
         if total == 0:
             accuracy = 0
             test_loss = 0
         else:
             accuracy = 100 * correct / total
             test_loss /= total
-        return {ACCURACY_KEY: accuracy, "loss": test_loss}
+        return {ACCURACY_KEY: accuracy, "loss": test_loss, "predictions": predictions}
 
     @property
     def num_test_samples(self):

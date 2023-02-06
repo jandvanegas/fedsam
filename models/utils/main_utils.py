@@ -99,6 +99,7 @@ def define_server_params(
     server_name,
     opt_ckpt,
     PublicDataset=None,
+    device=None
 ):
     if server_name == "fedavg":
         server_params = {"client_model": client_models[0]}
@@ -127,6 +128,7 @@ def define_server_params(
             "PublicDataset": PublicDataset,
             "batch_size": args.batch_size,
             "num_workers": args.num_workers,
+            "device": device
         }
     else:
         raise NotImplementedError

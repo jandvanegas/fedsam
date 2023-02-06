@@ -1,18 +1,16 @@
 import copy
+
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, random_split, SubsetRandomSampler
-from baseline_constants import (
-    BYTES_WRITTEN_KEY,
-    BYTES_READ_KEY,
-    CLIENT_PARAMS_KEY,
-    CLIENT_GRAD_KEY,
-    CLIENT_TASK_KEY,
-)
+from torch.utils.data import DataLoader, SubsetRandomSampler, random_split
+
+from baseline_constants import (BYTES_READ_KEY, BYTES_WRITTEN_KEY,
+                                CLIENT_GRAD_KEY, CLIENT_PARAMS_KEY,
+                                CLIENT_TASK_KEY)
 
 
 class FedMdServer:
-    def __init__(self, client_models, public_client_models, public_data, PublicDataset, batch_size, num_workers):
+    def __init__(self, client_models, public_client_models, public_data, PublicDataset, batch_size, num_workers, device):
         self.client_models = [
             copy.deepcopy(client_model) for client_model in client_models
         ]
@@ -33,6 +31,7 @@ class FedMdServer:
         self.PublicDataset = PublicDataset
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.device = device
 
     #################### METHODS FOR FEDERATED ALGORITHM ####################
 
@@ -49,12 +48,13 @@ class FedMdServer:
         Return:
             list of (num_train_samples, num_test_samples)
         """
-
-        num_clients = min(num_clients, len(possible_clients))
-        np.random.seed(my_round)
-        self.selected_clients = np.random.choice(
-            possible_clients, num_clients, replace=False
-        )
+        clients_by_model = self.get_clients_by_model(possible_clients)
+        self.selected_clients = []
+        num_models = 5
+        for model_index, model_clients in clients_by_model.items():
+            this_num_clients = min(num_clients // num_models, len(model_clients))
+            np.random.seed(my_round)
+            self.selected_clients.extend(np.random.choice(model_clients, this_num_clients, replace=False))
         return [
             (c.num_train_samples, c.num_test_samples) for c in self.selected_clients
         ]
@@ -66,6 +66,7 @@ class FedMdServer:
         minibatch=None,
         clients=None,
         pre_training=False,
+        consensus=False
     ):
         """Trains self.models on given clients.
 
@@ -117,13 +118,27 @@ class FedMdServer:
                 c.update_pretrained_model(pre_trained_models[c.model_index])
             print(f"{'*'*10} Pre-training public ended {'*'*10}")
 
-        print(f"{'*'*10} Train started {'*'*10}")
+        if consensus:
+            print(f"{'*'*10} Training on consensus {'*'*10}")
+            pre_trained_models = {}
+            all_models_trained = False
+            loader = self.consensus
+            for c in clients:
+                model_without_last_layer, losses = c.pre_train(
+                    loader=loader, num_epochs=num_epochs
+                )
+                pre_trained_models[c.id] = model_without_last_layer
+            print(f"{'*'*10} Updating clients {'*'*10}")
+            for c in clients:
+                c.update_pretrained_model(pre_trained_models[c.id])
+            print(f"{'*'*10} Pre-training public ended {'*'*10}")
+        print(f"{'*'*10} Private Training started {'*'*10}")
 
         for c in clients:
             num_samples, update = c.train(num_epochs)
             sys_metrics = self._update_sys_metrics(c, sys_metrics)
             self.updates.append((num_samples, copy.deepcopy(update)))
-        print(f"{'*'*10} Train ended {'*'*10}")
+        print(f"{'*'*10} Private Training ended {'*'*10}")
         return sys_metrics
 
     def get_loader(self, size):
@@ -185,20 +200,16 @@ class FedMdServer:
         Saves the new central model in self.client_model and its state dictionary in self.model
         """
 
-        # Average updates (fedavg)
-        # todo implement update
-
         clients = self.selected_clients
-        loader = self.get_loader(5000)
+        common_data = list(self.get_loader(5000))
+        predictions = [torch.zeros(len(common_data[i][1])).to(self.device) for i in range(len(common_data))]
         for c in clients:
-            c.test(set_to_use="public", loader=loader)
-
-        self.models = [
-            copy.deepcopy(client_model.state_dict())
-            for client_model in self.client_models
-        ]
-        self.updates = []
-        return
+            c_predictions = c.test(set_to_use="public", loader=common_data)['predictions']
+            for j, prediction_batch in enumerate(c_predictions):
+               predictions[j] = torch.add(predictions[j], prediction_batch) 
+        consensus = [[common_data[j][0], torch.div(prediction, len(clients)).long()] for j, prediction in enumerate(predictions)]
+        self.consensus = consensus
+        return consensus
 
     def update_clients_lr(self, lr, clients=None):
         if clients is None:
@@ -293,7 +304,10 @@ class FedMdServer:
             client.model.load_state_dict(models[f"client_{client.model_index}_model"])
 
     def get_clients_by_model(self, clients):
-        clients_by_model = {0: [], 1: [], 2: [], 3: [], 4: []}
+        clients_by_model = {}
         for client in clients:
-            clients_by_model[client.model_index].append(client)
+            if client.model_index in clients_by_model.keys():
+                clients_by_model[client.model_index].append(client)
+            else:
+                clients_by_model[client.model_index] = [client]
         return clients_by_model

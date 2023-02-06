@@ -1,26 +1,23 @@
 """Script to run the baselines."""
 import importlib
-from pprint import pprint
 import inspect
-import numpy as np
 import os
-
 # os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
 # os.environ['CUDA_VISIBLE_DEVICES'] = "3"
 import random
-import torch
-import wandb
 from datetime import datetime
+from pprint import pprint
+
+import numpy as np
+import torch
 
 import metrics.writer as metrics_writer
-from baseline_constants import (
-    MAIN_PARAMS,
-    MODEL_PARAMS,
-)
-from utils.args import parse_args, check_args
+import wandb
+from baseline_constants import MAIN_PARAMS, MODEL_PARAMS
+from utils.args import check_args, parse_args
 from utils.cutout import Cutout
 from utils.main_utils import *
-from utils.model_utils import read_data, read_public_data
+from utils.model_utils import read_data
 
 os.environ["WANDB_API_KEY"] = ""
 os.environ["WANDB_MODE"] = "offline"
@@ -139,6 +136,7 @@ def main():
         args.algorithm,
         opt_ckpt=args.load and checkpoint.get("opt_state_dict"),
         PublicDataset=PublicDataset,
+        device=device
     )
     server = Server(**server_params)
 
@@ -285,7 +283,6 @@ def main():
         #     swa_n,
         #     file,
         # )
-    quit()
     start_round = 0 if not args.load else checkpoint["round"]
     print("Start round:", start_round)
     wandb.log({"round": start_round}, commit=True)
@@ -310,6 +307,7 @@ def main():
                 num_epochs=args.num_epochs,
                 batch_size=args.batch_size,
                 minibatch=args.minibatch,
+                consensus=True
             )
         else:
             sys_metrics = server.train_model(
@@ -325,19 +323,16 @@ def main():
             train_clients_by_model = server.get_clients_by_model(
                 server.selected_clients
             )
-            test_clients_by_model = server.get_clients_by_model(test_clients)
-            for model_index in range(5):
-                train_model_clients = train_clients_by_model[model_index]
-                test_model_clients = test_clients_by_model[model_index]
+            for model_index, train_clients_by_model in train_clients_by_model.items():
                 accuracy = test_model(
                     -1,
                     eval_every,
                     num_rounds,
                     server,
-                    train_model_clients,
-                    server.get_clients_info(train_model_clients)[1],
-                    test_model_clients,
-                    server.get_clients_info(test_model_clients)[1],
+                    train_clients_for_this_model,
+                    server.get_clients_info(train_clients_for_this_model)[1],
+                    train_clients_for_this_model,
+                    server.get_clients_info(train_clients_for_this_model)[1],
                     args,
                     fp,
                     model=model_index,
@@ -706,6 +701,7 @@ def print_metrics(metrics, weights, fp, prefix="", model=None):
     ordered_weights = [weights[c] for c in sorted(weights)]
     metric_names = metrics_writer.get_metrics_names(metrics)
     metrics_values = []
+    metric_names = [x for x in metric_names if x in ('accuracy', 'loss')]
     for metric in metric_names:
         ordered_metric = [metrics[c][metric] for c in sorted(metrics)]
         print(
