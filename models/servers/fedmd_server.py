@@ -277,11 +277,11 @@ class FedMdServer:
 
     #################### METHODS FOR SAVING CHECKPOINTS ####################
 
-    def save_model(self, round, ckpt_path, swa_n=None):
+    def save_model(self, round, ckpt_path, swa_n=None, models_by_client=None):
         """Saves the servers model on checkpoints/dataset/model_name.ckpt."""
         # Save servers model
         save_info = {
-            "model_state_dict": [model for model in self.models],
+            "model_state_dict": [model for model in self.models] if not models_by_client else models_by_client,
             "round": round,
         }
         if self.swa_model is not None:

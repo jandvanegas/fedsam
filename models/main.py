@@ -2,6 +2,7 @@
 import importlib
 import inspect
 import os
+
 # os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
 # os.environ['CUDA_VISIBLE_DEVICES'] = "3"
 import random
@@ -136,10 +137,9 @@ def main():
         args.algorithm,
         opt_ckpt=args.load and checkpoint.get("opt_state_dict"),
         PublicDataset=PublicDataset,
-        device=device
+        device=device,
     )
     server = Server(**server_params)
-
 
     #### Create and set up clients ####
     if args.model == "destillation":
@@ -153,10 +153,12 @@ def main():
             run,
             device,
         )
-        train_client_ids, train_client_num_samples = server.get_clients_info(train_clients)
+        train_client_ids, train_client_num_samples = server.get_clients_info(
+            train_clients
+        )
         print("Clients in Total: %d" % len(train_clients))
         server.set_num_clients(len(train_clients))
-    else: 
+    else:
         train_clients, test_clients = setup_clients(
             args,
             client_models,
@@ -167,7 +169,9 @@ def main():
             run,
             device,
         )
-        train_client_ids, train_client_num_samples = server.get_clients_info(train_clients)
+        train_client_ids, train_client_num_samples = server.get_clients_info(
+            train_clients
+        )
         test_client_ids, test_client_num_samples = server.get_clients_info(test_clients)
         if set(train_client_ids) == set(test_client_ids):
             print("Clients in Total: %d" % len(train_clients))
@@ -245,8 +249,14 @@ def main():
         for model_index in range(5):
             # model_clients = train_clients_by_model[model_index]
             train_clients_for_this_model = train_clients_by_model[model_index]
-            train_model_clients = [c for c in train_clients_for_this_model if int(c.id) not in [0, 1, 2, 3, 4]]
-            test_model_clients = [c for c in train_clients_for_this_model if int(c.id) in [0, 1, 2, 3, 4]]
+            train_model_clients = [
+                c
+                for c in train_clients_for_this_model
+                if int(c.id) not in [0, 1, 2, 3, 4]
+            ]
+            test_model_clients = [
+                c for c in train_clients_for_this_model if int(c.id) in [0, 1, 2, 3, 4]
+            ]
             accuracy = test_model(
                 -1,
                 eval_every,
@@ -260,7 +270,7 @@ def main():
                 fp,
                 model=model_index,
             )
-            
+
             if accuracy is not None:
                 if model_index in last_accuracies:
                     last_accuracies[model_index].append(accuracy)
@@ -271,18 +281,26 @@ def main():
 
             #     log_gradient_information(-1, server, model, public=True)
         pprint(last_accuracies)
-        # save_models(
-        #     -1,
-        #     num_rounds,
-        #     server,
-        #     args,
-        #     ckpt_path,
-        #     ckpt_name,
-        #     job_name,
-        #     current_time,
-        #     swa_n,
-        #     file,
-        # )
+        save_models(
+            -1,
+            num_rounds,
+            server,
+            args,
+            ckpt_path,
+            ckpt_name,
+            job_name,
+            current_time,
+            swa_n,
+            file,
+            models_by_client={
+                c.id: {
+                    "model": c.model.state_dict(),
+                    "public_model": c.model.state_dict(),
+                }
+                for c in train_clients
+                if int(c.id) in [0, 1, 2, 3, 4]
+            },
+        )
     start_round = 0 if not args.load else checkpoint["round"]
     print("Start round:", start_round)
     wandb.log({"round": start_round}, commit=True)
@@ -307,7 +325,7 @@ def main():
                 num_epochs=args.num_epochs,
                 batch_size=args.batch_size,
                 minibatch=args.minibatch,
-                consensus=True
+                consensus=True,
             )
         else:
             sys_metrics = server.train_model(
@@ -358,23 +376,31 @@ def main():
             if accuracy is not None:
                 last_accuracies[0].append(accuracy)
 
-        if hasattr(server, "client_models"):
-            for model in server.client_models:
-                log_gradient_information(i, server, model, public=False)
-        else:
-            log_gradient_information(i, server)
-        # save_models(
-        #     i,
-        #     num_rounds,
-        #     server,
-        #     args,
-        #     ckpt_path,
-        #     ckpt_name,
-        #     job_name,
-        #     current_time,
-        #     swa_n,
-        #     file,
-        # )
+        # if hasattr(server, "client_models"):
+        #     for model in server.client_models:
+        #         log_gradient_information(i, server, model, public=False)
+        # else:
+        #     log_gradient_information(i, server)
+        save_models(
+            i,
+            num_rounds,
+            server,
+            args,
+            ckpt_path,
+            ckpt_name,
+            job_name,
+            current_time,
+            swa_n,
+            file,
+            models_by_client={
+                c.id: {
+                    "model": c.model.state_dict(),
+                    "public_model": c.model.state_dict(),
+                }
+                for c in server.selected_clients
+                if int(c.id) in [0, 1, 2, 3, 4]
+            },
+        )
 
     ## FINAL ANALYSIS ##
     # where_saved = server.save_model(
@@ -499,7 +525,7 @@ def setup_clients(
             public_models=public_models,
             PublicDataset=PublicDataset,
         )
-        # we don't test with different clietns given that 
+        # we don't test with different clietns given that
         # we don't share the same model
         # we test the same clients on different data
         # to be test we need the model to be trained in public and private data
@@ -651,16 +677,12 @@ def print_stats(
     public=False,
     model=0,
 ):
-    train_stat_metrics = server.test_model(
-        train_clients, set_to_use="train"
-    )
+    train_stat_metrics = server.test_model(train_clients, set_to_use="train")
     val_metrics, val_metrics_names = print_metrics(
         train_stat_metrics, train_num_samples, fp, prefix="train_", model=model
     )
 
-    test_stat_metrics = server.test_model(
-        test_clients, set_to_use="test"
-    )
+    test_stat_metrics = server.test_model(test_clients, set_to_use="test")
     test_metrics, test_metrics_names = print_metrics(
         test_stat_metrics,
         test_num_samples,
@@ -701,7 +723,7 @@ def print_metrics(metrics, weights, fp, prefix="", model=None):
     ordered_weights = [weights[c] for c in sorted(weights)]
     metric_names = metrics_writer.get_metrics_names(metrics)
     metrics_values = []
-    metric_names = [x for x in metric_names if x in ('accuracy', 'loss')]
+    metric_names = [x for x in metric_names if x in ("accuracy", "loss")]
     for metric in metric_names:
         ordered_metric = [metrics[c][metric] for c in sorted(metrics)]
         print(
@@ -772,7 +794,10 @@ def test_model(
 ):
 
     if (
-        i == -1 or (i + 1) % eval_every == 0 or (i + 1) == num_rounds or (i + 1) > num_rounds - 100
+        i == -1
+        or (i + 1) % eval_every == 0
+        or (i + 1) == num_rounds
+        or (i + 1) > num_rounds - 100
     ):  # eval every round in last 100 rounds
         _, test_metrics = print_stats(
             i + 1,
@@ -830,6 +855,7 @@ def save_models(
     current_time,
     swa_n,
     file,
+    models_by_client=None,
 ):
 
     # Save round global model checkpoint
@@ -844,12 +870,16 @@ def save_models(
             os.path.join(
                 ckpt_path,
                 "round:" + str(i + 1) + "_" + job_name + "_" + current_time + ".ckpt",
+                models_by_client=models_by_client,
             ),
             swa_n if args.swa else None,
         )
     else:
         where_saved = server.save_model(
-            i + 1, os.path.join(ckpt_path, ckpt_name), swa_n if args.swa else None
+            i + 1,
+            os.path.join(ckpt_path, ckpt_name),
+            swa_n if args.swa else None,
+            models_by_client=models_by_client,
         )
     wandb.save(where_saved)
     print("Checkpoint saved in path: %s" % where_saved)
