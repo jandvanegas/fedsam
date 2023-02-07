@@ -240,7 +240,9 @@ class FedMdServer:
         num_samples = {c.id: c.num_samples for c in clients}
         return ids, num_samples
         
-    def number_of_samples_by_set(self, clients, set_to_use):
+    def number_of_samples_by_set(self, clients: list, set_to_use):
+        if not isinstance(clients, list):
+            clients = [clients]
         return {c.id: c.num_samples_by_set(set_to_use) for c in clients}
 
     def num_parameters(self, params):
