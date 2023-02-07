@@ -179,7 +179,6 @@ class Client:
             optimizer.step()  # update of weights
             i += 1
         if i == 0:
-            print("Not running epoch", self.id)
             return 0
         return running_loss / i
 
@@ -201,7 +200,6 @@ class Client:
             optimizer.step()  # update of weights
             i += 1
         if i == 0:
-            print("Not running epoch", self.id)
             return 0
         return running_loss / i
 
