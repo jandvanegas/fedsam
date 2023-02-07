@@ -302,7 +302,7 @@ class Client:
         if set_to_use == "train":
             return self.num_train_samples
         elif set_to_use == "test":
-            return self.num_num_test_samples
+            return self.num_test_samples
     
     @property
     def model(self):
