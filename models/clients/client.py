@@ -73,10 +73,9 @@ class Client:
         """Pretrains on self.model using the client's train_data.
 
         Args:
+            loader: common public data
             num_epochs: Number of epochs to train. Unsupported if minibatch is provided (minibatch has only 1 epoch)
-            batch_size: Size of training batches.
-            minibatch: fraction of client's data to apply minibatch sgd,
-                None to use FedAvg
+
         Return:
             num_samples: number of samples used in training
             update: state dictionary of the trained model

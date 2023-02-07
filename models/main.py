@@ -459,7 +459,7 @@ def create_clients(
             else:
                 client = model_index
             client_params["public_model"] = public_models[client]
-            client_params["share_model"] = True
+            client_params["share_model"] = False
 
         client_params["model"] = clients_models[client]
         client_params["model_index"] = client

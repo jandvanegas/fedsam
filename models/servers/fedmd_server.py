@@ -108,10 +108,10 @@ class FedMdServer:
                     all_models_trained = True
                     break
                 if c.model_index not in pre_trained_models:
-                    model_without_last_layer, losses = c.pre_train(
+                    public_model, losses = c.pre_train(
                         loader=loader, num_epochs=num_epochs
                     )
-                    pre_trained_models[c.model_index] = model_without_last_layer
+                    pre_trained_models[c.model_index] = public_model
             assert all_models_trained, "Not all models are trained"
             print(f"{'*'*10} Updating clients {'*'*10}")
             for c in clients:
@@ -124,10 +124,10 @@ class FedMdServer:
             all_models_trained = False
             loader = self.consensus
             for c in clients:
-                model_without_last_layer, losses = c.pre_train(
+                public_model, losses = c.pre_train(
                     loader=loader, num_epochs=num_epochs
                 )
-                pre_trained_models[c.id] = model_without_last_layer
+                pre_trained_models[c.id] = public_model
             print(f"{'*'*10} Updating clients {'*'*10}")
             for c in clients:
                 c.update_pretrained_model(pre_trained_models[c.id])
