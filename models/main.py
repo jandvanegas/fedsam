@@ -342,6 +342,7 @@ def main():
                 server.selected_clients
             )
             for model_index, train_clients_by_model in train_clients_by_model.items():
+                train_clients_for_this_model = train_clients_by_model[model_index]
                 accuracy = test_model(
                     -1,
                     eval_every,
