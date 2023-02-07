@@ -102,7 +102,7 @@ class FedMdServer:
             print(f"{'*'*10} Pre-training public started {'*'*10}")
             pre_trained_models = {}
             all_models_trained = False
-            loader = self.get_loader(5000)
+            loader = self.get_loader(50000)
             for c in clients:
                 if len(pre_trained_models) == 5:
                     all_models_trained = True
