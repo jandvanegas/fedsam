@@ -292,7 +292,18 @@ class Client:
             int: Number of samples for this client
         """
         return self.num_train_samples + self.num_test_samples
+    
+    def num_samples_by_set(self, set_to_use):
+        """Number samples for this client.
 
+        Return:
+            int: Number of samples for this client
+        """
+        if set_to_use == "train":
+            return self.num_train_samples
+        elif set_to_use == "test":
+            return self.num_num_test_samples
+    
     @property
     def model(self):
         """Returns this client reference to model being trained"""

@@ -153,7 +153,7 @@ def main():
             run,
             device,
         )
-        train_client_ids, train_client_num_samples = server.get_clients_info(
+        train_client_ids, _ = server.get_clients_info(
             train_clients
         )
         print("Clients in Total: %d" % len(train_clients))
@@ -263,9 +263,9 @@ def main():
                 num_rounds,
                 server,
                 train_model_clients,
-                server.get_clients_info(train_model_clients)[1],
+                server.number_of_samples_per_class(train_clients_for_this_model, set_to_use="train"),
                 test_model_clients,
-                server.get_clients_info(test_model_clients)[1],
+                server.number_of_samples_per_class(test_model_clients, set_to_use="test"),
                 args,
                 fp,
                 model=model_index,
@@ -348,9 +348,9 @@ def main():
                     num_rounds,
                     server,
                     train_clients_for_this_model,
-                    server.get_clients_info(train_clients_for_this_model)[1],
+                    server.number_of_samples_per_class(train_clients_for_this_model, set_to_use="train"),
                     train_clients_for_this_model,
-                    server.get_clients_info(train_clients_for_this_model)[1],
+                    server.number_of_samples_per_class(train_clients_for_this_model, set_to_use="test"),
                     args,
                     fp,
                     model=model_index,
